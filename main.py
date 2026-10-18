@@ -55,7 +55,8 @@ app.add_middleware(
     allow_origins=ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "OPTIONS"],
-    allow_headers=["X-Request-ID", "X-Client-Id"],
+    allow_headers=["X-Request-ID", "X-Client-Id", "Content-Type"],
+    max_age=600,
 )
 app.add_middleware(RequestContext)
 
