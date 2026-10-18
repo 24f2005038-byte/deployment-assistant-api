@@ -22,10 +22,16 @@ buckets = defaultdict(deque)
 
 class RequestContext(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-        request.state.request_id = rid
+        request_id = request.headers.get("X-Request-ID")
+
+        if not request_id:
+            request_id = str(uuid.uuid4())
+
+        request.state.request_id = request_id
+
         response = await call_next(request)
-        response.headers["X-Request-ID"] = rid
+        response.headers["X-Request-ID"] = request_id
+
         return response
 
 
