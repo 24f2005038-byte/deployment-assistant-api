@@ -1,69 +1,64 @@
-import os
 import time
 import uuid
 from collections import defaultdict, deque
 from threading import Lock
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.cors import CORSMiddleware
 
 EMAIL = "24f2005038@ds.study.iitm.ac.in"
-ORIGINS = [
+
+ALLOWED_ORIGINS = [
     "https://app-bcx7se.example.com",
     "https://exam.sanand.workers.dev",
 ]
 
+RATE_LIMIT = 11
+WINDOW_SECONDS = 10
+
 app = FastAPI()
-lock = Lock()
-buckets = defaultdict(deque)
+
+rate_buckets = defaultdict(deque)
+rate_lock = Lock()
 
 
-class RequestContext(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        request_id = request.headers.get("X-Request-ID")
+@app.middleware("http")
+async def request_middleware(request: Request, call_next):
+    request_id = (
+        request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    )
+    request.state.request_id = request_id
 
-        if not request_id:
-            request_id = str(uuid.uuid4())
-
-        request.state.request_id = request_id
-
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-
-        return response
-
-
-class RateLimiter(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        client = request.headers.get("X-Client-Id", "default")
+    # Don't consume rate-limit tokens for CORS preflight requests.
+    if request.method != "OPTIONS":
+        client_id = request.headers.get("X-Client-Id", "anonymous")
         now = time.monotonic()
 
-        with lock:
-            q = buckets[client]
-            while q and now - q[0] >= 10:
-                q.popleft()
-            if len(q) >= 11:
-                return JSONResponse(
-                    {"detail": "Rate limit exceeded"},
-                    status_code=429,
+        with rate_lock:
+            bucket = rate_buckets[client_id]
+
+            while bucket and now - bucket[0] >= WINDOW_SECONDS:
+                bucket.popleft()
+
+            if len(bucket) >= RATE_LIMIT:
+                retry_after = max(
+                    1,
+                    int(WINDOW_SECONDS - (now - bucket[0]) + 0.999),
                 )
-            q.append(now)
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded"},
+                    headers={"Retry-After": str(retry_after)},
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
 
-        return await call_next(request)
+            bucket.append(now)
 
-
-app.add_middleware(RateLimiter)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ORIGINS,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    max_age=600,
-)
-app.add_middleware(RequestContext)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.get("/ping")
@@ -72,3 +67,18 @@ async def ping(request: Request):
         "email": EMAIL,
         "request_id": request.state.request_id,
     }
+
+
+# Register CORS so preflight is handled before rate limiting.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=[
+        "X-Request-ID",
+        "X-Client-Id",
+        "Content-Type",
+    ],
+    expose_headers=["X-Request-ID"],
+    allow_credentials=False,
+)
