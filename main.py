@@ -1,0 +1,68 @@
+import os
+import time
+import uuid
+from collections import defaultdict, deque
+from threading import Lock
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
+
+EMAIL = "24f2005038@ds.study.iitm.ac.in"
+ORIGINS = ["https://app-bcx7se.example.com"]
+
+exam_origin = os.getenv("EXAM_ORIGIN")
+if exam_origin and exam_origin not in ORIGINS:
+    ORIGINS.append(exam_origin)
+
+app = FastAPI()
+lock = Lock()
+buckets = defaultdict(deque)
+
+
+class RequestContext(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = rid
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        return response
+
+
+class RateLimiter(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        client = request.headers.get("X-Client-Id", "default")
+        now = time.monotonic()
+
+        with lock:
+            q = buckets[client]
+            while q and now - q[0] >= 10:
+                q.popleft()
+            if len(q) >= 11:
+                return JSONResponse(
+                    {"detail": "Rate limit exceeded"},
+                    status_code=429,
+                )
+            q.append(now)
+
+        return await call_next(request)
+
+
+app.add_middleware(RateLimiter)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["X-Request-ID", "X-Client-Id"],
+)
+app.add_middleware(RequestContext)
+
+
+@app.get("/ping")
+async def ping(request: Request):
+    return {
+        "email": EMAIL,
+        "request_id": request.state.request_id,
+    }
