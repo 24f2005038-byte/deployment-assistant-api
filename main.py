@@ -15,7 +15,6 @@ ORIGINS = ["https://app-bcx7se.example.com"]
 exam_origin = os.getenv("EXAM_ORIGIN")
 if exam_origin and exam_origin not in ORIGINS:
     ORIGINS.append(exam_origin)
-
 app = FastAPI()
 lock = Lock()
 buckets = defaultdict(deque)
@@ -54,9 +53,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
-    allow_headers=["X-Request-ID", "X-Client-Id", "Content-Type"],
-    max_age=600,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 app.add_middleware(RequestContext)
 
