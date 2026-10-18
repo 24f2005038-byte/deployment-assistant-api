@@ -10,11 +10,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 EMAIL = "24f2005038@ds.study.iitm.ac.in"
-ORIGINS = ["https://app-bcx7se.example.com"]
+ORIGINS = [
+    "https://app-bcx7se.example.com",
+    "https://exam.sanand.workers.dev",
+]
 
-exam_origin = os.getenv("EXAM_ORIGIN")
-if exam_origin and exam_origin not in ORIGINS:
-    ORIGINS.append(exam_origin)
 app = FastAPI()
 lock = Lock()
 buckets = defaultdict(deque)
@@ -55,6 +55,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=600,
 )
 app.add_middleware(RequestContext)
 
